@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Clockwise odometry-yaw scan; latch HOLD as soon as one car bbox fits inside the frame.
-YOLO full-box stop followed by CFV mirror check and experimental red end cue.
-Depth stage: the depth camera measures the car's range, position, orientation and length;
-the CFV mirror mapping picks the rear end (mirror right -> rear on image/robot LEFT,
-mirror left -> rear on image/robot RIGHT); A* plans around the car to a point behind the
-rear bumper and the Jackal turns to face the car. No Gazebo ground-truth poses are used.
-Use for a stationary car in the held crop. Restart if the car or camera moves.
-"""
+
 import argparse
 import math
 import heapq
@@ -79,8 +72,6 @@ def red_cue(crop):
 
 
 def interpret_view(i, j, score, mirror_score, cue, threshold):
-    # User calibration maps MIRROR class to ORIGINAL camera image direction.
-    # This is deliberately not a generic coordinate conversion.
     if not all(math.isfinite(v) for v in (score, mirror_score)):
         return ('UNCERTAIN', 'Invalid model scores')
     if min(score, mirror_score) < threshold:
@@ -464,17 +455,7 @@ def scan_main():
         nav_main(args.execute, car, robot_pose, est, rear_side, args.debug_image, args.backup_distance, args.cmd_topic)
 
 
-# ---------------------------------------------------------------------------
-# Depth-camera car localisation + A* rear approach (no Gazebo ground truth).
-#
-#   1. CFV (stage above) says which IMAGE side the car's rear is on.
-#   2. The depth image inside the YOLO box is turned into a top-down point set;
-#      a RANSAC line fit finds the car's long side, giving its position,
-#      orientation and length in the robot frame (and its range from the camera).
-#   3. The end of that side that appears on the CFV image side is the rear.
-#   4. A* plans (in the odom frame) around the inflated car box to a goal
-#      REAR_CLEARANCE behind the rear bumper, then the robot turns to face the car.
-# ---------------------------------------------------------------------------
+
 CAMERA_X = .2106           # camera mount in base_link, forward (m)
 CAMERA_Y = .0175           # camera mount in base_link, left (m)
 CMD_TOPIC = NS + '/platform/cmd_vel'
@@ -517,7 +498,6 @@ def robot_to_world(p, pose):
     return (rx + c*p[0] - s*p[1], ry + s*p[0] + c*p[1])
 
 
-# ----------------------------- depth helpers -------------------------------
 
 def depth_to_meters(raw):
     """32FC1 (m) or 16UC1 (mm) -> float32 metres, invalid -> NaN."""
@@ -718,10 +698,9 @@ def acquire_car_estimate(node, args, box, color_size, rear_image_side):
     return car, robot_pose, est
 
 
-# ------------------------- goal, obstacle and A* ---------------------------
 
 def rear_goal(car):
-    """Robot-centre goal REAR_CLEARANCE behind the rear bumper, facing the car."""
+    
     ux, uy = math.cos(car.rear_yaw), math.sin(car.rear_yaw)
     bumper = (car.x + ux*car.length/2., car.y + uy*car.length/2.)
     goal = (bumper[0] + ux*REAR_CLEARANCE, bumper[1] + uy*REAR_CLEARANCE,
@@ -832,7 +811,6 @@ def box_corners(car, half_l, half_w):
 
 
 def save_debug_plot(filename, robot_pose, car, goal, bumper, path, points_robot):
-    """Top-down PNG in the odom frame so the depth estimate can be checked by eye."""
     pts = [robot_to_world(p, robot_pose) for p in points_robot[::4]]
     inflated = box_corners(car, car.length/2. + INFLATION, CAR_WIDTH/2. + INFLATION)
     body = box_corners(car, car.length/2., CAR_WIDTH/2.)
@@ -863,8 +841,6 @@ def save_debug_plot(filename, robot_pose, car, goal, bumper, path, points_robot)
     cv2.imwrite(str(filename), img)
     print(f'Debug top-down plot written to {filename}', flush=True)
 
-
-# ------------------------------- navigation --------------------------------
 
 class JackalController(Node):
 
